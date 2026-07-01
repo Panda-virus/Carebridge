@@ -1,0 +1,11 @@
+{
+  "name": "carebridge-system",
+  "private": true,
+  "version": "1.0.0",
+  "description": "CareBridge runs from the Laravel backend. Use: .\\start.ps1",
+  "scripts": {
+    "dev": "echo Run .\\start.ps1 from project root instead. && exit 1",
+    "build": "cd frontend && npm run build",
+    "start": "powershell -ExecutionPolicy Bypass -File ./start.ps1"
+  }
+}

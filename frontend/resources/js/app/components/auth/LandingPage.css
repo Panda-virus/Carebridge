@@ -1,0 +1,49 @@
+@keyframes scroll {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-100% / 2));
+  }
+}
+
+.slider-container {
+  overflow: hidden;
+  width: 100%;
+}
+
+.animate-scroll {
+  animation: scroll 12s linear infinite;
+  display: flex;
+  gap: inherit;
+  width: max-content;
+}
+
+.animate-scroll > div {
+  display: flex;
+  gap: inherit;
+  flex-shrink: 0;
+}
+
+.animate-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.animate-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.animate-scroll::-webkit-scrollbar-thumb {
+  background: #279B37;
+  border-radius: 4px;
+}
+
+.animate-scroll::-webkit-scrollbar-thumb:hover {
+  background: #1e7a2d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-scroll {
+    animation: none;
+  }
+}
