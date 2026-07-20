@@ -19,12 +19,15 @@ import {
 import { CaseReport, CaseWorkflowStage, UserRole } from '../../types';
 import { EmergencyCaseAlert } from '../alerts/EmergencyAlert';
 import { CaseWorkflowPanel, WorkflowActionPayload } from '../cases/CaseWorkflowPanel';
-import { WorkflowAction, WORKFLOW_STAGE_LABELS } from '../../utils/caseWorkflow';
+import { WorkflowAction, WORKFLOW_STAGE_LABELS, isApprovedForInvestigationStage } from '../../utils/caseWorkflow';
+import { downloadProtectedFile } from '../../utils/fileDownloader';
+import { ReportExportPanel } from '../ReportExportPanel';
 
 interface IICDashboardProps {
   reports: CaseReport[];
   onWorkflowAction: (reportId: string, action: WorkflowAction, payload: WorkflowActionPayload) => void;
   onAcknowledgeCase?: (reportId: string) => void;
+  onExport?: (params: { month: string; category: string; format: 'html' | 'pdf'; type?: string }) => Promise<void>;
   onLogout?: () => void;
 }
 
@@ -59,7 +62,7 @@ const CASE_SUB_PAGES: CaseSubPage[] = [
     key: 'investigation',
     label: 'Approved for Investigation',
     stage: 'investigation',
-    filter: (r) => r.workflowStage === 'investigation',
+    filter: (r) => isApprovedForInvestigationStage(r.workflowStage),
   },
 ];
 
@@ -292,13 +295,23 @@ function CaseTable({
                         {Array.isArray(report.findingsFiles) && report.findingsFiles.length ? (
                           <div className="space-y-2">
                             {report.findingsFiles.map((file) => {
-                              const downloadHref = file.path
-                                ? `/api/case-reports/${report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`
-                                : file.url;
+                              const handleDownloadFile = async () => {
+                                if (file.path) {
+                                  await downloadProtectedFile(
+                                    `/api/case-reports/${report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`,
+                                    file.name
+                                  );
+                                  return;
+                                }
+                                if (file.url) {
+                                  window.open(file.url, '_blank', 'noreferrer');
+                                }
+                              };
+
                               return (
-                                <a key={file.path} href={downloadHref} download={file.name} className="text-primary underline">
+                                <button key={file.path || file.url} type="button" onClick={handleDownloadFile} className="text-primary underline text-left">
                                   {file.name}
-                                </a>
+                                </button>
                               );
                             })}
                           </div>
@@ -479,7 +492,7 @@ function SubPageContainer({ title, description, children }: { title: string; des
   );
 }
 
-export function IICDashboard({ reports, onWorkflowAction, onAcknowledgeCase, onLogout }: IICDashboardProps) {
+export function IICDashboard({ reports, onWorkflowAction, onAcknowledgeCase, onExport, onLogout }: IICDashboardProps) {
   const [topLevelPage, setTopLevelPage] = useState<TopLevelPage>('cases');
   const [activeSubPage, setActiveSubPage] = useState<string>('pending');
   const [savingId, setSavingId] = useState<string | null>(null);
@@ -506,7 +519,7 @@ export function IICDashboard({ reports, onWorkflowAction, onAcknowledgeCase, onL
     pending: reports.filter((r) => (r.workflowStage ?? 'at_iic') === 'at_iic' && r.status === 'submitted').length,
     acknowledged: reports.filter((r) => r.status === 'acknowledged').length,
     pending_permission: reports.filter((r) => r.workflowStage === 'permission_pending').length,
-    investigation: reports.filter((r) => r.workflowStage === 'investigation').length,
+    investigation: reports.filter((r) => isApprovedForInvestigationStage(r.workflowStage)).length,
     findings: reports.filter((r) => r.workflowStage === 'findings_with_registrar').length,
   };
 
@@ -621,47 +634,49 @@ export function IICDashboard({ reports, onWorkflowAction, onAcknowledgeCase, onL
           </div>
         )}
 
-        <div className="bg-destructive/5 border border-destructive/20 rounded-xl p-4 mb-8 flex items-start gap-3">
-          <Lock className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-foreground">Case Workflow</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              1. Review new report → 2. Request investigation permission from Registrar → 3. Investigate after approval → 4. Submit findings to Registrar
-            </p>
+        <div className="space-y-6 mb-6">
+          <div className="bg-destructive/5 border border-destructive/20 rounded-xl p-4 flex items-start gap-3">
+            <Lock className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-medium text-foreground">Case Workflow</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                1. Review new report → 2. Request investigation permission from Registrar → 3. Investigate after approval → 4. Submit findings to Registrar
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="mb-6 flex border-b border-border overflow-x-auto">
-          <button
-            onClick={() => setTopLevelPage('cases')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              topLevelPage === 'cases'
-                ? 'border-destructive text-destructive font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Cases
-          </button>
-          <button
-            onClick={() => setTopLevelPage('findings')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              topLevelPage === 'findings'
-                ? 'border-destructive text-destructive font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            Findings
-            {counts.findings > 0 && (
-              <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-destructive/10 text-xs text-destructive">
-                {counts.findings}
-              </span>
-            )}
-          </button>
+          <div className="flex flex-col md:flex-row flex-wrap gap-2 border-b border-border overflow-x-auto md:overflow-visible">
+            <button
+              onClick={() => setTopLevelPage('cases')}
+              className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
+                topLevelPage === 'cases'
+                  ? 'border-destructive text-destructive font-medium'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Cases
+            </button>
+            <button
+              onClick={() => setTopLevelPage('findings')}
+              className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
+                topLevelPage === 'findings'
+                  ? 'border-destructive text-destructive font-medium'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Findings
+              {counts.findings > 0 && (
+                <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-destructive/10 text-xs text-destructive">
+                  {counts.findings}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         {topLevelPage === 'cases' && (
           <div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-6">
               {CASE_SUB_PAGES.map((sub) => (
                 <button
                   key={sub.key}
@@ -710,25 +725,44 @@ export function IICDashboard({ reports, onWorkflowAction, onAcknowledgeCase, onL
         )}
 
         {topLevelPage === 'findings' && (
-          <SubPageContainer
-            title="Findings"
-            description="Review investigation findings submitted by the committee and forward them to the Registrar for processing."
-          >
-            {filteredReports.length === 0 ? (
-              <div className="bg-card rounded-xl border border-border p-12 text-center">
-                <ClipboardList className="w-8 h-8 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No findings awaiting review.</p>
+          <div>
+            <SubPageContainer
+              title="Findings"
+              description="Review investigation findings submitted by the committee and forward them to the Registrar for processing."
+            >
+              {filteredReports.length === 0 ? (
+                <div className="bg-card rounded-xl border border-border p-12 text-center">
+                  <ClipboardList className="w-8 h-8 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">No findings awaiting review.</p>
+                </div>
+              ) : (
+                <CaseTable
+                  reports={filteredReports}
+                  onWorkflowAction={handleAction}
+                  savingId={savingId}
+                  showFindingsColumn
+                  activeSubPage={activeSubPage}
+                />
+              )}
+            </SubPageContainer>
+
+            {onExport ? (
+              <div className="mt-6">
+                <ReportExportPanel
+                  availableCategories={[...new Set(reports.map((r) => r.category).filter(Boolean))] as string[]}
+                  onExport={onExport}
+                  typeOptions={[
+                    { value: 'default', label: 'Default IIC report' },
+                    { value: 'detailed_case_report', label: 'Detailed case report' },
+                    { value: 'investigation_report', label: 'Investigation report' },
+                    { value: 'case_progress_report', label: 'Case progress report' },
+                    { value: 'referral_report', label: 'Referral report' },
+                  ]}
+                  initialMonth={new Date().toISOString().slice(0, 7)}
+                />
               </div>
-            ) : (
-              <CaseTable
-                reports={filteredReports}
-                onWorkflowAction={handleAction}
-                savingId={savingId}
-                showFindingsColumn
-                activeSubPage={activeSubPage}
-              />
-            )}
-          </SubPageContainer>
+            ) : null}
+          </div>
         )}
       </div>
     </div>

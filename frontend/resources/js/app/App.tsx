@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CounselingRequest, CaseReport, CaseStatus, UserRole, CounselorSchedule, CounselingSession, ExternalCounselor } from './types';
 import { StudentDashboard } from './components/StudentDashboard';
@@ -145,6 +145,7 @@ export default function App() {
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [authTransitionState, setAuthTransitionState] = useState<'idle' | 'signing-in' | 'signing-out'>('idle');
   const [profileForm, setProfileForm] = useState({
     name: '',
     email: '',
@@ -205,9 +206,58 @@ export default function App() {
     return response;
   };
 
+  const downloadReport = async (params: { startDate: string; endDate: string; category: string; format: 'html' | 'pdf'; type?: string }) => {
+    const query = new URLSearchParams();
+    query.set('startDate', params.startDate);
+    query.set('endDate', params.endDate);
+    query.set('category', params.category);
+    query.set('format', params.format);
+    if (params.type && params.type !== 'default') {
+      query.set('type', params.type);
+    }
+
+    const endpoint = params.type === 'user-activity'
+      ? '/api/reports/users/export'
+      : '/api/case-reports/export';
+
+    const response = await fetch(`${endpoint}?${query.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let message = 'Unable to export report.';
+      try {
+        const payload = await response.json();
+        message = payload.message || message;
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const filename = params.type === 'user-activity'
+      ? `carebridge-user-activity-report-${params.startDate}to${params.endDate}.${params.format}`
+      : `carebridge-report-${params.startDate}to${params.endDate}${params.category !== 'all' ? `-${params.category}` : ''}.${params.format}`;
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  };
+
+  const [isRestoring, setIsRestoring] = useState(true);
+
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken');
     if (!storedToken) {
+      setIsRestoring(false);
       return;
     }
 
@@ -232,6 +282,8 @@ export default function App() {
         localStorage.removeItem('authUser');
         setAuthToken(null);
         setAuthUser(null);
+      } finally {
+        setIsRestoring(false);
       }
     };
 
@@ -262,10 +314,10 @@ export default function App() {
 
   const normalizeCounselingRequest = (raw: any): CounselingRequest => ({
     id: raw.id.toString(),
-    studentId: raw.student_id?.toString() ?? '',
-    studentName: raw.student_name,
-    studentEmail: raw.student_email,
-    studentPhone: raw.student_phone ?? undefined,
+    studentId: raw.student_id?.toString() ?? raw.student?.id?.toString() ?? '',
+    studentName: raw.student_name ?? raw.student?.name ?? undefined,
+    studentEmail: raw.student_email ?? raw.student?.email ?? undefined,
+    studentPhone: raw.student_phone ?? raw.student?.phone ?? undefined,
     studentLocation: raw.student_location ?? undefined,
     concern: raw.concern,
     category: raw.category,
@@ -355,10 +407,10 @@ export default function App() {
       registrarCaseFile: raw.registrar_case_file ?? raw.registrarCaseFile ?? undefined,
       meetingDate: parseDate(raw.meeting_date ?? raw.meetingDate),
       verdict: raw.verdict ?? undefined,
-      studentName: raw.student_name ?? raw.studentName ?? undefined,
-      studentId: raw.student_id?.toString() ?? raw.studentId?.toString() ?? undefined,
-      studentEmail: raw.student_email ?? raw.studentEmail ?? undefined,
-      studentPhone: raw.student_phone ?? raw.studentPhone ?? undefined,
+      studentName: raw.student_name ?? raw.studentName ?? raw.student?.name ?? raw.affectedStudent?.name ?? raw.reportedByUser?.name ?? undefined,
+      studentId: raw.student_id?.toString() ?? raw.studentId?.toString() ?? raw.affected_student_id?.toString() ?? raw.affectedStudent?.id?.toString() ?? raw.reported_by_user_id?.toString() ?? raw.reportedByUser?.id?.toString() ?? undefined,
+      studentEmail: raw.student_email ?? raw.studentEmail ?? raw.student?.email ?? raw.affectedStudent?.email ?? raw.reportedByUser?.email ?? undefined,
+      studentPhone: raw.student_phone ?? raw.studentPhone ?? raw.student?.phone ?? raw.affectedStudent?.phone ?? raw.reportedByUser?.phone ?? undefined,
       reportedByType: raw.reported_by_type ?? raw.reportedByType ?? undefined,
       reportedByName:
         raw.reporter_name ??
@@ -464,6 +516,8 @@ export default function App() {
 
   // ─── Auth handlers ────────────────────────────────────────────────────────
   const handleLogin = async (email: string, password: string): Promise<string | null> => {
+    setAuthTransitionState('signing-in');
+
     try {
       const response = await fetch('/api/login', {
         method: 'POST',
@@ -487,6 +541,7 @@ export default function App() {
       }
 
       if (!payload?.user || !payload?.token) {
+        setAuthTransitionState('idle');
         return 'Unexpected login response. Is the backend running? Run start.ps1 from the project root.';
       }
 
@@ -503,6 +558,8 @@ export default function App() {
       return null;
     } catch (error) {
       return 'Unable to reach backend. Run start.ps1 from the project root (starts API + database check + frontend).';
+    } finally {
+      setAuthTransitionState('idle');
     }
   };
 
@@ -567,68 +624,104 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    const loadBackendData = async () => {
-      if (!authToken) {
-        return;
+  const refreshDashboardData = useCallback(async () => {
+    if (!authToken || !authUser) {
+      return;
+    }
+
+    try {
+      const [requestsResponse, caseReportsResponse, scheduleResponse, sessionsResponse, counselorsResponse] = await Promise.all([
+        apiFetch('/counseling-requests'),
+        apiFetch('/case-reports'),
+        apiFetch('/counselor-schedules'),
+        apiFetch('/counseling-sessions'),
+        apiFetch('/external-counselors'),
+      ]);
+
+      const requestsJson = await requestsResponse.json();
+      const normalizedRequests = requestsJson.map(normalizeCounselingRequest);
+      const scopedRequests = authUser.role === 'student'
+        ? normalizedRequests.filter((request) => {
+            const matchesId = request.studentId === authUser.id;
+            const matchesEmail = request.studentEmail && authUser.email && request.studentEmail.toLowerCase() === authUser.email.toLowerCase();
+            const matchesName = request.studentName && authUser.name && request.studentName.toLowerCase() === authUser.name.toLowerCase();
+            return matchesId || matchesEmail || matchesName;
+          })
+        : normalizedRequests;
+      setRequests(scopedRequests);
+
+      const caseReportsJson = await caseReportsResponse.json();
+      const normalizedReports: CaseReport[] = [];
+      for (const rawReport of caseReportsJson) {
+        try {
+          normalizedReports.push(normalizeCaseReport(rawReport));
+        } catch (error) {
+          console.error('Skipping invalid case report payload', error, rawReport);
+        }
+      }
+      setCaseReports(normalizedReports);
+
+      const scheduleJson = await scheduleResponse.json();
+      const matchingSchedule = scheduleJson.find((item: any) =>
+        item.counselor_id?.toString() === currentCounselorId ||
+        item.counselor_name === currentCounselorName
+      );
+      if (matchingSchedule) {
+        setCounselorSchedule(normalizeSchedule(matchingSchedule));
+        setShowScheduleSetupModal(false);
+      } else {
+        setCounselorSchedule(getDefaultCounselorSchedule(currentCounselorId, currentCounselorName));
+        if (authUser.role === 'counselor' && !authUser.scheduleSetupAt) {
+          setShowScheduleSetupModal(true);
+        }
       }
 
-      try {
-        const [requestsResponse, caseReportsResponse, scheduleResponse, sessionsResponse, counselorsResponse] = await Promise.all([
-          apiFetch('/counseling-requests'),
-          apiFetch('/case-reports'),
-          apiFetch('/counselor-schedules'),
-          apiFetch('/counseling-sessions'),
-          apiFetch('/external-counselors'),
-        ]);
+      const sessionsJson = await sessionsResponse.json();
+      setSessions(sessionsJson.map(normalizeCounselingSession));
 
-        const requestsJson = await requestsResponse.json();
-        const normalizedRequests = requestsJson.map(normalizeCounselingRequest);
-        const scopedRequests = authUser?.role === 'student'
-          ? normalizedRequests.filter((request) => request.studentId === authUser.id)
-          : normalizedRequests;
-        setRequests(scopedRequests);
+      const counselorsJson = await counselorsResponse.json();
+      setExternalCounselors(counselorsJson.map(normalizeExternalCounselor));
+    } catch (error) {
+      console.error('Unable to load backend data', error);
+    }
+  }, [authToken, authUser, currentCounselorId, currentCounselorName]);
 
-        const caseReportsJson = await caseReportsResponse.json();
-        const normalizedReports: CaseReport[] = [];
-        for (const rawReport of caseReportsJson) {
-          try {
-            normalizedReports.push(normalizeCaseReport(rawReport));
-          } catch (error) {
-            console.error('Skipping invalid case report payload', error, rawReport);
-          }
-        }
-        setCaseReports(normalizedReports);
+  useEffect(() => {
+    let isMounted = true;
 
-        const scheduleJson = await scheduleResponse.json();
-        const matchingSchedule = scheduleJson.find((item: any) =>
-          item.counselor_id?.toString() === currentCounselorId ||
-          item.counselor_name === currentCounselorName
-        );
-        if (matchingSchedule) {
-          setCounselorSchedule(normalizeSchedule(matchingSchedule));
-          setShowScheduleSetupModal(false);
-        } else {
-          setCounselorSchedule(getDefaultCounselorSchedule(currentCounselorId, currentCounselorName));
-          if (authUser?.role === 'counselor' && !authUser?.scheduleSetupAt) {
-            setShowScheduleSetupModal(true);
-          }
-        }
+    const refresh = async () => {
+      if (!authToken || !authUser || !isMounted) {
+        return;
+      }
+      await refreshDashboardData();
+    };
 
-        const sessionsJson = await sessionsResponse.json();
-        setSessions(sessionsJson.map(normalizeCounselingSession));
+    void refresh();
 
-        const counselorsJson = await counselorsResponse.json();
-        setExternalCounselors(counselorsJson.map(normalizeExternalCounselor));
-      } catch (error) {
-        console.error('Unable to load backend data', error);
+    const intervalId = window.setInterval(() => {
+      void refresh();
+    }, 5000);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh();
       }
     };
 
-    loadBackendData();
-  }, [authToken]);
+    window.addEventListener('focus', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [authToken, authUser, refreshDashboardData]);
 
   const handleLogout = async () => {
+    setAuthTransitionState('signing-out');
+
     try {
       if (authToken) {
         await apiFetch('/logout', { method: 'POST' });
@@ -643,6 +736,7 @@ export default function App() {
       setRequests([]);
       setCaseReports([]);
       setShowProfile(false);
+      setAuthTransitionState('idle');
     }
   };
 
@@ -1296,8 +1390,11 @@ export default function App() {
       if (payload.meetingNotice) body.meeting_notice = payload.meetingNotice;
       if (payload.meetingDate) body.meeting_date = payload.meetingDate;
       if (payload.verdict) body.verdict = payload.verdict;
-      if (payload.responseNotes) body.response_notes = payload.responseNotes;
-      if (payload.reason) body.reason = payload.reason;
+      const noteText = payload.responseNotes ?? payload.reason;
+      if (noteText) {
+        body.response_notes = noteText;
+        body.reason = noteText;
+      }
       if (payload.meetingEmails) body.meeting_emails = JSON.stringify(payload.meetingEmails);
       if (payload.verdictEmails) body.verdict_emails = JSON.stringify(payload.verdictEmails);
       requestBody = JSON.stringify(body);
@@ -1312,6 +1409,7 @@ export default function App() {
       setCaseReports((prev) => prev.map((r) => (r.id === reportId ? updatedReport : r)));
     } catch (error) {
       console.error(`Workflow action ${action} failed for case ${reportId}`, error);
+      throw error;
     }
   };
 
@@ -1323,10 +1421,22 @@ export default function App() {
     }));
   };
 
+  const showAuthTransitionOverlay = authTransitionState !== 'idle';
+
   // ─── Login screen with modal overlay ──────────────────────────────────────
-  if (!authUser) {
+  if (!authUser && !isRestoring) {
     return (
       <div className="relative">
+        {showAuthTransitionOverlay && (
+          <div className="pointer-events-none fixed inset-x-0 top-0 z-[80] flex justify-center px-4 pt-4">
+            <div className="rounded-full border border-white/40 bg-white/70 px-4 py-2 text-sm font-medium text-slate-700 shadow-lg backdrop-blur-sm">
+              <div className="flex items-center gap-2">
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                <span>{authTransitionState === 'signing-out' ? 'Signing out...' : 'Signing in...'}</span>
+              </div>
+            </div>
+          </div>
+        )}
         <LandingPage
           chatbotOpen={showChatbot}
           onOpenChatbot={() => setShowChatbot(true)}
@@ -1419,6 +1529,15 @@ export default function App() {
     );
   }
 
+  // If we're still restoring session, show a neutral loader to avoid route flash
+  if (isRestoring) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="rounded-md border border-border bg-white/80 px-6 py-4 text-sm font-medium text-muted-foreground shadow">Restoring session…</div>
+      </div>
+    );
+  }
+
   // ─── Role header (staff roles) ────────────────────────────────────────────
   const roleLabels: Record<UserRole, string> = {
     student: 'Student Portal',
@@ -1474,13 +1593,23 @@ export default function App() {
 
   const iicReports = caseReports.filter((report) => routeForReport(report) === 'iic');
 
-  const registrarWorkflowReports = caseReports.filter(
-    (r) =>
+  const registrarWorkflowReports = caseReports.filter((r) => {
+    const isActiveRegistrarWorkflow =
       r.workflowStage === 'permission_pending' ||
       r.workflowStage === 'permission_approved' ||
       r.workflowStage === 'investigation' ||
-      r.workflowStage === 'findings_with_registrar'
-  );
+      r.workflowStage === 'findings_with_registrar';
+
+    const isRegistrarDecisionCase =
+      r.workflowStage === 'with_disciplinary' ||
+      r.workflowStage === 'closed' ||
+      r.status === 'referred_to_disciplinary_hearing' ||
+      r.status === 'closed' ||
+      r.registrarAction === 'referred' ||
+      r.registrarAction === 'dismissed';
+
+    return isActiveRegistrarWorkflow || isRegistrarDecisionCase;
+  });
 
   const registrarFeesReports = caseReports.filter(
     (report) =>
@@ -1490,12 +1619,14 @@ export default function App() {
         report.subCategory === 'living_expenses')
   );
 
-  const disciplinaryWorkflowReports = caseReports.filter(
-    (r) =>
+  const disciplinaryWorkflowReports = caseReports.filter((r) => {
+    const isDisciplinaryWorkflow =
       r.workflowStage === 'with_disciplinary' ||
       r.workflowStage === 'meeting_notice_sent' ||
-      (r.workflowStage === 'closed' && routeForReport(r) === 'disciplinary')
-  );
+      r.status === 'referred_to_disciplinary_hearing';
+
+    return isDisciplinaryWorkflow || (r.workflowStage === 'closed' && routeForReport(r) === 'disciplinary');
+  });
 
   const deanReports = caseReports.filter(
     (report) => routeForReport(report) === 'dean'
@@ -1511,10 +1642,22 @@ export default function App() {
   // Staff roles render their dashboards
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
+      {showAuthTransitionOverlay && (
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-[80] flex justify-center px-4 pt-4">
+          <div className="rounded-full border border-white/40 bg-white/70 px-4 py-2 text-sm font-medium text-slate-700 shadow-lg backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+              <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              <span>{authTransitionState === 'signing-out' ? 'Signing out...' : 'Signing in...'}</span>
+            </div>
+          </div>
+        </div>
+      )}
       {authUser.role === 'counselor' && (
         <CounselorDashboard
           counselorId={currentCounselorId}
           counselorName={currentCounselorName}
+          counselorEmail={authUser.email}
+          counselorPhone={authUser.phone}
           requests={requests}
           currentSchedule={counselorSchedule}
           sessions={sessions}
@@ -1529,6 +1672,7 @@ export default function App() {
           onReferExternal={handleReferExternal}
           onDismissCase={handleDismissCase}
           onSaveSchedule={handleSaveCounselorSchedule}
+          onExport={downloadReport}
           showScheduleSetupModal={showScheduleSetupModal && !authUser.scheduleSetupAt && !counselorSchedule.id}
           onScheduleSetupComplete={handleScheduleSetupComplete}
           onLogout={handleLogout}
@@ -1548,6 +1692,7 @@ export default function App() {
             reports={iicReports}
             onWorkflowAction={handleCaseWorkflowAction}
             onAcknowledgeCase={handleAcknowledgeCase}
+            onExport={downloadReport}
             onLogout={handleLogout}
           />
         </DashboardErrorBoundary>
@@ -1557,6 +1702,7 @@ export default function App() {
         <DisciplinaryDashboard
           reports={disciplinaryWorkflowReports}
           onWorkflowAction={handleCaseWorkflowAction}
+          onExport={downloadReport}
           onLogout={handleLogout}
         />
       )}
@@ -1567,6 +1713,7 @@ export default function App() {
           feesReports={registrarFeesReports}
           onWorkflowAction={handleCaseWorkflowAction}
           onUpdateFeesReport={handleUpdateCaseReport}
+          onExport={downloadReport}
           onLogout={handleLogout}
         />
       )}
@@ -1583,7 +1730,7 @@ export default function App() {
       )}
 
       {authUser.role === 'system_administrator' && (
-        <SystemAdministrator reports={caseReports} authUser={authUser} onLogout={handleLogout} />
+        <SystemAdministrator reports={caseReports} authUser={authUser} onExport={downloadReport} onLogout={handleLogout} />
       )}
     </div>
   );

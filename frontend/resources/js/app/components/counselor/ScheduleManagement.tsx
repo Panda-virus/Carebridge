@@ -112,7 +112,7 @@ export function ScheduleManagement({
       {/* Add New Slot */}
       <div className="mb-6 p-4 bg-muted/30 rounded-lg border border-border">
         <h3 className="text-foreground mb-4">Add Time Slot</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
           <div>
             <label className="block text-sm text-muted-foreground mb-2">Day</label>
             <select
@@ -174,7 +174,7 @@ export function ScheduleManagement({
 
       {/* Current Slots */}
       <div className="mb-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <h3 className="text-foreground">Current Schedule</h3>
           <button
             onClick={handleApplyDefaultSchedule}

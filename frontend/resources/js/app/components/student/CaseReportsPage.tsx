@@ -322,7 +322,7 @@ export function CaseReportsPage({ onSubmitReport, submittedReports, studentEmail
   const myReports = submittedReports.filter((r) => {
     const isMyCase = r.studentId === studentId || r.studentEmail === studentEmail;
     return isMyCase && !(
-      ['sexual_harassment_gbv', 'sexual_assault', 'gbv'].includes(r.category) && r.isAnonymous
+      isSensitiveCaseCategory(r.category) && r.isAnonymous
     );
   });
 
@@ -354,7 +354,7 @@ export function CaseReportsPage({ onSubmitReport, submittedReports, studentEmail
 
   // ── Success screen ─────────────────────────────────────────────────────────
   if (step === 'success') {
-    const isGBV = selectedCategory != null && ['sexual_harassment_gbv', 'sexual_assault', 'gbv'].includes(selectedCategory);
+    const isGBV = selectedCategory != null && isSensitiveCaseCategory(selectedCategory);
     return (
       <div className="min-h-screen bg-background py-8 sm:py-12 px-3 sm:px-4 overflow-x-hidden">
         <div className="max-w-2xl mx-auto text-center">
@@ -394,7 +394,7 @@ export function CaseReportsPage({ onSubmitReport, submittedReports, studentEmail
 
   // ── Fill form screen ───────────────────────────────────────────────────────
   if (step === 'fill-form' && selectedCategory) {
-    const isGBV = ['sexual_harassment_gbv', 'sexual_assault', 'gbv'].includes(resolvedCategory ?? '');
+    const isGBV = isSensitiveCaseCategory(resolvedCategory);
     return (
       <div className="min-h-screen bg-background py-6 sm:py-10 px-3 sm:px-4 overflow-x-hidden">
         <div className="max-w-2xl mx-auto">

@@ -266,7 +266,7 @@ export function DeanDashboard({ reports, onUpdateReport }: DeanDashboardProps) {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
+        <div className="flex flex-col md:flex-row gap-1 mb-6 border-b border-border overflow-x-auto md:overflow-visible">
           {[
             { key: 'all', label: `All (${counts.all})` },
             { key: 'submitted', label: `New (${counts.submitted})` },

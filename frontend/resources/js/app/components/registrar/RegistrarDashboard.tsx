@@ -17,14 +17,17 @@ import {
   LogOut,
 } from 'lucide-react';
 import { CaseReport, CaseStatus, GeneralSubCategory, UserRole } from '../../types';
-import { WorkflowAction, WORKFLOW_STAGE_LABELS } from '../../utils/caseWorkflow';
+import { WorkflowAction, WORKFLOW_STAGE_LABELS, isApprovedForInvestigationStage } from '../../utils/caseWorkflow';
 import { WorkflowActionPayload } from '../cases/CaseWorkflowPanel';
+import { downloadProtectedFile } from '../../utils/fileDownloader';
+import { ReportExportPanel } from '../ReportExportPanel';
 
 interface RegistrarDashboardProps {
   workflowReports: CaseReport[];
   feesReports: CaseReport[];
   onWorkflowAction: (reportId: string, action: WorkflowAction, payload: WorkflowActionPayload) => void;
   onUpdateFeesReport: (reportId: string, status: CaseStatus, responseNotes?: string) => void;
+  onExport?: (params: { month: string; category: string; format: 'html' | 'pdf'; type?: string }) => Promise<void>;
   onLogout?: () => void;
 }
 
@@ -47,20 +50,26 @@ function WorkflowCaseRow({
   onApprove,
   onWorkflowAction,
   onOpenNotesModal,
+  onOpenDetails,
+  onOpenCaseFile,
   savingId,
   forApprovedPage,
   forFindingsReview,
   forReferredPage,
+  forAllPage,
   index,
 }: {
   report: CaseReport;
   onApprove: (reportId: string) => void;
   onWorkflowAction: (reportId: string, action: any, payload?: any) => void;
   onOpenNotesModal?: (reportId: string, action: 'forward_to_disciplinary' | 'dismiss_case', required?: boolean) => void;
+  onOpenDetails?: (report: CaseReport) => void;
+  onOpenCaseFile?: (report: CaseReport) => void;
   savingId: string | null;
   forApprovedPage?: boolean;
   forFindingsReview?: boolean;
   forReferredPage?: boolean;
+  forAllPage?: boolean;
   index?: number;
 }) {
   const isPending = report.workflowStage === 'permission_pending';
@@ -82,18 +91,28 @@ function WorkflowCaseRow({
           {Array.isArray(report.findingsFiles) && report.findingsFiles.length ? (
             <div className="mt-2 space-y-2">
               {report.findingsFiles.map((file) => {
-                const downloadHref = file.path
-                  ? `/api/case-reports/${report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`
-                  : file.url;
+                const handleDownloadFile = async () => {
+                  if (file.path) {
+                    await downloadProtectedFile(
+                      `/api/case-reports/${report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`,
+                      file.name
+                    );
+                    return;
+                  }
+                  if (file.url) {
+                    window.open(file.url, '_blank', 'noreferrer');
+                  }
+                };
+
                 return (
-                  <a
-                    key={file.path}
-                    href={downloadHref}
-                    download={file.name}
+                  <button
+                    key={file.path || file.url}
+                    type="button"
+                    onClick={handleDownloadFile}
                     className="text-primary underline"
                   >
                     {file.name}
-                  </a>
+                  </button>
                 );
               })}
             </div>
@@ -104,7 +123,7 @@ function WorkflowCaseRow({
             {report.registrarCaseFile && (
               <button
                 type="button"
-                onClick={() => window.alert(report.registrarCaseFile)}
+                onClick={() => onOpenCaseFile?.(report)}
                 className="text-sm text-muted-foreground underline"
               >
                 View Case File
@@ -143,7 +162,7 @@ function WorkflowCaseRow({
             {report.registrarCaseFile && (
               <button
                 type="button"
-                onClick={() => window.alert(report.registrarCaseFile)}
+                onClick={() => onOpenCaseFile?.(report)}
                 className="text-sm text-muted-foreground underline"
               >
                 View Case File
@@ -165,6 +184,38 @@ function WorkflowCaseRow({
           <span className="inline-flex items-center rounded-full bg-success/10 px-2.5 py-1 text-xs font-semibold text-success">
             Approved for Investigation
           </span>
+        </td>
+      </tr>
+    );
+  }
+
+  if (forAllPage) {
+    return (
+      <tr className="border-b border-border last:border-none hover:bg-accent/10 transition-colors">
+        <td className="px-4 py-3 text-sm text-muted-foreground">{typeof index === 'number' ? index + 1 : '—'}</td>
+        <td className="px-4 py-3 text-sm text-foreground font-medium">{report.ticketNumber ?? report.id}</td>
+        <td className="px-4 py-3 text-sm text-foreground">
+          <button
+            type="button"
+            onClick={() => onOpenDetails?.(report)}
+            className="w-full text-left text-sm text-foreground line-clamp-1 truncate"
+          >
+            {report.subject ?? report.description}
+          </button>
+        </td>
+        <td className="px-4 py-3 text-sm text-foreground">
+          <span className="inline-flex items-center rounded-full bg-muted/10 px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+            {WORKFLOW_STAGE_LABELS[report.workflowStage ?? 'at_iic'] ?? report.workflowStage ?? 'Unknown'}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right">
+          <button
+            type="button"
+            onClick={() => onOpenDetails?.(report)}
+            className="text-primary underline text-sm"
+          >
+            View details
+          </button>
         </td>
       </tr>
     );
@@ -263,6 +314,7 @@ export function RegistrarDashboard({
   feesReports,
   onWorkflowAction,
   onUpdateFeesReport,
+  onExport,
   onLogout,
 }: RegistrarDashboardProps) {
   const [workflowTab, setWorkflowTab] = useState<'all' | 'permission_pending' | 'investigation' | 'findings_with_registrar' | 'referred'>('permission_pending');
@@ -271,12 +323,15 @@ export function RegistrarDashboard({
   const [showNotesModal, setShowNotesModal] = useState(false);
   const [modalReport, setModalReport] = useState<null | { report: CaseReport; action: 'forward_to_disciplinary' | 'dismiss_case'; required: boolean }>(null);
   const [modalNotes, setModalNotes] = useState('');
+  const [showCaseFileModal, setShowCaseFileModal] = useState(false);
+  const [caseFileReport, setCaseFileReport] = useState<CaseReport | null>(null);
   const [modalSaving, setModalSaving] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [showCaseDetailModal, setShowCaseDetailModal] = useState(false);
+  const [caseDetailReport, setCaseDetailReport] = useState<CaseReport | null>(null);
 
   const permissionPending = workflowReports.filter((r) => r.workflowStage === 'permission_pending');
-  const approvedCases = workflowReports.filter(
-    (r) => r.workflowStage === 'permission_approved' || r.workflowStage === 'investigation'
-  );
+  const approvedCases = workflowReports.filter((r) => isApprovedForInvestigationStage(r.workflowStage));
   const findingsPending = workflowReports.filter((r) => r.workflowStage === 'findings_with_registrar');
   const referredCases = workflowReports.filter((r) => r.registrarAction === 'referred' || r.workflowStage === 'with_disciplinary' || r.status === 'referred_to_disciplinary_hearing');
   const verdictCases = workflowReports.filter((r) => Boolean(r.verdict));
@@ -284,7 +339,7 @@ export function RegistrarDashboard({
     workflowTab === 'all'
       ? workflowReports
       : workflowTab === 'investigation'
-      ? workflowReports.filter((r) => r.workflowStage === 'permission_approved' || r.workflowStage === 'investigation')
+      ? workflowReports.filter((r) => isApprovedForInvestigationStage(r.workflowStage))
       : workflowTab === 'referred'
       ? referredCases
       : workflowReports.filter((r) => r.workflowStage === workflowTab);
@@ -311,12 +366,36 @@ export function RegistrarDashboard({
     if (!report) return;
     setModalReport({ report, action, required });
     setModalNotes('');
+    setModalError(null);
     setShowNotesModal(true);
   };
+
+  const openCaseDetails = (report: CaseReport) => {
+    setCaseDetailReport(report);
+    setShowCaseDetailModal(true);
+  };
+
+  const openCaseFile = (report: CaseReport) => {
+    setCaseFileReport(report);
+    setShowCaseFileModal(true);
+  };
+
+  const closeCaseFile = () => {
+    setShowCaseFileModal(false);
+    setCaseFileReport(null);
+  };
+
+  const closeCaseDetails = () => {
+    setShowCaseDetailModal(false);
+    setCaseDetailReport(null);
+  };
+
+  const reportCategories = Array.from(new Set(workflowReports.map((r) => r.category).filter(Boolean))) as string[];
 
   const handleConfirmModal = async () => {
     if (!modalReport) return;
     if (modalReport.required && !modalNotes.trim()) return;
+    setModalError(null);
     setModalSaving(true);
     setSavingId(modalReport.report.id);
     try {
@@ -325,12 +404,15 @@ export function RegistrarDashboard({
       } else {
         await onWorkflowAction(modalReport.report.id, 'dismiss_case', { reason: modalNotes });
       }
-    } catch (e) {
-      // ignore — caller will handle
+      setShowNotesModal(false);
+      setModalReport(null);
+      setModalNotes('');
+    } catch (e: any) {
+      setModalError(e?.message || 'Unable to complete this action. Please try again.');
+    } finally {
+      setModalSaving(false);
+      setSavingId(null);
     }
-    setModalSaving(false);
-    setModalReport(null);
-    setModalNotes('');
   };
 
   return (
@@ -388,9 +470,31 @@ export function RegistrarDashboard({
                 )}
                 {Array.isArray(modalReport.report.findingsFiles) && modalReport.report.findingsFiles.length > 0 && (
                   <div className="mt-2 space-y-1">
-                    {modalReport.report.findingsFiles.map((file) => (
-                      <a key={file.path || file.url} href={file.path ? `/api/case-reports/${modalReport.report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}` : file.url} download={file.name} className="text-primary underline block">{file.name}</a>
-                    ))}
+                    {modalReport.report.findingsFiles.map((file) => {
+                      const handleDownloadModalFile = async () => {
+                        if (file.path) {
+                          await downloadProtectedFile(
+                            `/api/case-reports/${modalReport.report.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`,
+                            file.name
+                          );
+                          return;
+                        }
+                        if (file.url) {
+                          window.open(file.url, '_blank', 'noreferrer');
+                        }
+                      };
+
+                      return (
+                        <button
+                          key={file.path || file.url}
+                          type="button"
+                          onClick={handleDownloadModalFile}
+                          className="text-primary underline block text-left"
+                        >
+                          {file.name}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -405,8 +509,19 @@ export function RegistrarDashboard({
               </div>
             </div>
 
+            {modalError ? <p className="mt-3 text-sm text-destructive">{modalError}</p> : null}
             <div className="flex items-center justify-end gap-3 mt-4">
-              <button onClick={() => { setShowNotesModal(false); setModalReport(null); setModalNotes(''); }} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground">Cancel</button>
+              <button
+                onClick={() => {
+                  setShowNotesModal(false);
+                  setModalReport(null);
+                  setModalNotes('');
+                  setModalError(null);
+                }}
+                className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground"
+              >
+                Cancel
+              </button>
               <button
                 onClick={handleConfirmModal}
                 disabled={(modalReport.required && !modalNotes.trim()) || modalSaving}
@@ -418,13 +533,126 @@ export function RegistrarDashboard({
           </div>
         </div>
       )}
+
+      {showCaseFileModal && caseFileReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl overflow-auto rounded-3xl border border-border bg-card p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-foreground">Case file</h3>
+                <p className="text-sm text-muted-foreground mt-1">Review the registrar case file content in-app.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCaseFile}
+                className="rounded-full border border-border bg-background px-3 py-2 text-sm text-muted-foreground hover:bg-accent/50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-border bg-background/70 p-4">
+              <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Case number</p>
+              <p className="mt-1 text-sm font-semibold text-foreground">{caseFileReport.ticketNumber ?? caseFileReport.id}</p>
+              <div className="mt-4 whitespace-pre-wrap rounded-2xl border border-border bg-muted/10 p-4 text-sm leading-6 text-foreground">
+                {caseFileReport.registrarCaseFile || 'No case file content is available yet.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCaseDetailModal && caseDetailReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl overflow-auto rounded-3xl border border-border bg-card p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-semibold text-foreground">Case details</h3>
+                <p className="text-sm text-muted-foreground mt-1">Tap outside or close to return to the table.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeCaseDetails}
+                className="rounded-full border border-border bg-background px-3 py-2 text-sm text-muted-foreground hover:bg-accent/50"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Case Number</p>
+                  <p className="text-sm font-semibold text-foreground">{caseDetailReport.ticketNumber ?? caseDetailReport.id}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Stage</p>
+                  <p className="text-sm font-semibold text-foreground">{WORKFLOW_STAGE_LABELS[caseDetailReport.workflowStage ?? 'at_iic'] ?? caseDetailReport.workflowStage ?? 'Unknown'}</p>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Category</p>
+                  <p className="text-sm text-foreground">{caseDetailReport.detailedCategory || caseDetailReport.category || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Reported</p>
+                  <p className="text-sm text-foreground">{caseDetailReport.studentName || caseDetailReport.studentEmail || 'Unknown'}</p>
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Title / Description</p>
+                <p className="mt-2 rounded-2xl border border-border bg-muted/10 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{caseDetailReport.subject ?? caseDetailReport.description ?? 'No details available.'}</p>
+              </div>
+              {caseDetailReport.permissionRequest ? (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Permission Request</p>
+                  <p className="mt-2 rounded-2xl border border-border bg-muted/10 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{caseDetailReport.permissionRequest}</p>
+                </div>
+              ) : null}
+              {caseDetailReport.findingsReport ? (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Findings Report</p>
+                  <p className="mt-2 rounded-2xl border border-border bg-muted/10 p-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{caseDetailReport.findingsReport}</p>
+                </div>
+              ) : null}
+              {Array.isArray(caseDetailReport.findingsFiles) && caseDetailReport.findingsFiles.length > 0 ? (
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">Attached Files</p>
+                  <div className="mt-2 space-y-2">
+                    {caseDetailReport.findingsFiles.map((file) => (
+                      <button
+                        key={file.path || file.url}
+                        type="button"
+                        onClick={async () => {
+                          if (file.path) {
+                            await downloadProtectedFile(
+                              `/api/case-reports/${caseDetailReport.id}/findings-file?file_path=${encodeURIComponent(file.path)}&file_name=${encodeURIComponent(file.name)}`,
+                              file.name
+                            );
+                          } else if (file.url) {
+                            window.open(file.url, '_blank', 'noreferrer');
+                          }
+                        }}
+                        className="text-primary underline text-left"
+                      >
+                        {file.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
       <div className="mx-auto max-w-6xl px-3 py-4 sm:px-4 sm:py-6 md:px-8 md:py-8">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-foreground">Registrar Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">Approve permission requests, review findings, and manage case progress.</p>
         </div>
 
-        <div className="mb-6 flex flex-wrap gap-2 border-b border-border pb-4">
+        <div className="mb-6 flex flex-col sm:flex-row flex-wrap gap-2 border-b border-border pb-4">
           <button
             onClick={() => handleTabChange('permission_pending')}
             className={`px-4 py-2 border-b-2 text-sm font-medium transition-colors ${workflowTab === 'permission_pending' && !verdictsTab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
@@ -463,18 +691,20 @@ export function RegistrarDashboard({
           </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div className="bg-card rounded-xl border border-border p-5">
-            <p className="text-2xl font-bold text-foreground">{permissionPending.length}</p>
-            <p className="text-sm text-muted-foreground mt-1">Permission Requests Pending</p>
-          </div>
-          <div className="bg-card rounded-xl border border-border p-5">
-            <p className="text-2xl font-bold text-foreground">{approvedCases.length}</p>
-            <p className="text-sm text-muted-foreground mt-1">Approved Cases</p>
-          </div>
-          <div className="bg-card rounded-xl border border-border p-5">
-            <p className="text-2xl font-bold text-foreground">{findingsPending.length}</p>
-            <p className="text-sm text-muted-foreground mt-1">Findings Awaiting Review</p>
+        <div className="grid gap-6 xl:grid-cols-[1.7fr_1fr] mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="bg-card rounded-xl border border-border p-5">
+              <p className="text-2xl font-bold text-foreground">{permissionPending.length}</p>
+              <p className="text-sm text-muted-foreground mt-1">Permission Requests Pending</p>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-5">
+              <p className="text-2xl font-bold text-foreground">{approvedCases.length}</p>
+              <p className="text-sm text-muted-foreground mt-1">Approved Cases</p>
+            </div>
+            <div className="bg-card rounded-xl border border-border p-5">
+              <p className="text-2xl font-bold text-foreground">{findingsPending.length}</p>
+              <p className="text-sm text-muted-foreground mt-1">Findings Awaiting Review</p>
+            </div>
           </div>
         </div>
 
@@ -521,55 +751,83 @@ export function RegistrarDashboard({
             No cases found for this view.
           </div>
         ) : (
-          <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="min-w-full border-collapse text-left">
-              <thead>
-                <tr className="bg-muted/50 text-muted-foreground">
-                  {workflowTab === 'findings_with_registrar' ? (
-                    <>
-                      <th className="px-4 py-3 text-sm font-semibold">No.</th>
-                      <th className="px-4 py-3 text-sm font-semibold">Case Number</th>
-                      <th className="px-4 py-3 text-sm font-semibold">Case Title</th>
-                      <th className="px-4 py-3 text-sm font-semibold">Findings</th>
-                      <th className="px-4 py-3 text-sm font-semibold text-right">Action</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="px-4 py-3 text-sm font-semibold">Case Number</th>
-                      <th className="px-4 py-3 text-sm font-semibold">Case Title</th>
-                      {workflowTab === 'investigation' ? (
-                        <>
-                          <th className="px-4 py-3 text-sm font-semibold">Handler</th>
-                          <th className="px-4 py-3 text-sm font-semibold">Status</th>
-                        </>
-                      ) : (
-                        <>
-                          <th className="px-4 py-3 text-sm font-semibold">Submitted Request</th>
-                          <th className="px-4 py-3 text-sm font-semibold text-right">Action</th>
-                        </>
-                      )}
-                    </>
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredWorkflowReports.map((report, index) => (
-                  <WorkflowCaseRow
-                    key={report.id}
-                    report={report}
-                    index={index}
-                    onApprove={handleApprove}
-                    onWorkflowAction={onWorkflowAction}
-                    onOpenNotesModal={openNotesModal}
-                    savingId={savingId}
-                    forApprovedPage={workflowTab === 'investigation'}
-                    forFindingsReview={workflowTab === 'findings_with_registrar'}
-                    forReferredPage={workflowTab === 'referred'}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="overflow-x-auto rounded-xl border border-border bg-card">
+              <table className="min-w-full border-collapse text-left">
+                <thead>
+                  <tr className="bg-muted/50 text-muted-foreground">
+                    {workflowTab === 'findings_with_registrar' ? (
+                      <>
+                        <th className="px-4 py-3 text-sm font-semibold">No.</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Case Number</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Case Title</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Findings</th>
+                        <th className="px-4 py-3 text-sm font-semibold text-right">Action</th>
+                      </>
+                    ) : workflowTab === 'all' ? (
+                      <>
+                        <th className="px-4 py-3 text-sm font-semibold">No.</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Case Number</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Details</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Stage</th>
+                        <th className="px-4 py-3 text-sm font-semibold text-right">Action</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-3 text-sm font-semibold">Case Number</th>
+                        <th className="px-4 py-3 text-sm font-semibold">Case Title</th>
+                        {workflowTab === 'investigation' ? (
+                          <>
+                            <th className="px-4 py-3 text-sm font-semibold">Handler</th>
+                            <th className="px-4 py-3 text-sm font-semibold">Status</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-4 py-3 text-sm font-semibold">Submitted Request</th>
+                            <th className="px-4 py-3 text-sm font-semibold text-right">Action</th>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredWorkflowReports.map((report, index) => (
+                    <WorkflowCaseRow
+                      key={report.id}
+                      report={report}
+                      index={index}
+                      onApprove={handleApprove}
+                      onWorkflowAction={onWorkflowAction}
+                      onOpenNotesModal={openNotesModal}
+                      onOpenDetails={openCaseDetails}
+                      onOpenCaseFile={openCaseFile}
+                      savingId={savingId}
+                      forApprovedPage={workflowTab === 'investigation'}
+                      forFindingsReview={workflowTab === 'findings_with_registrar'}
+                      forReferredPage={workflowTab === 'referred'}
+                      forAllPage={workflowTab === 'all'}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {workflowTab === 'all' && onExport ? (
+              <div className="mt-6">
+                <ReportExportPanel
+                  availableCategories={reportCategories}
+                  onExport={onExport}
+                  typeOptions={[
+                    { value: 'default', label: 'Default registrar report' },
+                    { value: 'permission_summary', label: 'Permission request summary' },
+                    { value: 'case_review_report', label: 'Case review report' },
+                    { value: 'findings_review_report', label: 'Findings review report' },
+                  ]}
+                  initialMonth={new Date().toISOString().slice(0, 7)}
+                />
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </div>

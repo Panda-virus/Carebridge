@@ -50,9 +50,17 @@ class GbvTriageService
                 $detailedCategory = 'sexual_assault';
                 $matchedKeywords = array_values(array_unique(array_merge($gbvMatches, $shMatches, $sexualAssaultMatches)));
             } else {
-                $category = 'sexual_harassment_gbv';
-                $detailedCategory = count($gbvMatches) >= count($shMatches) ? 'gbv' : 'sexual_harassment';
-                $matchedKeywords = array_values(array_unique(array_merge($gbvMatches, $shMatches)));
+                // Prefer explicit sexual harassment signals when present (e.g., "sexually harassed").
+                if (count($shMatches) > 0 && count($gbvMatches) === 0) {
+                    $category = 'sexual_harassment_gbv';
+                    $detailedCategory = 'sexual_harassment';
+                    $matchedKeywords = array_values(array_unique(array_merge($shMatches, $gbvMatches)));
+                } else {
+                    // Fallback: keep the combined GBV/SH bucket but pick the dominant detailed category
+                    $category = 'sexual_harassment_gbv';
+                    $detailedCategory = count($gbvMatches) > count($shMatches) ? 'gbv' : 'sexual_harassment';
+                    $matchedKeywords = array_values(array_unique(array_merge($gbvMatches, $shMatches)));
+                }
             }
         }
 

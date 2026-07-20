@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { EmailListInput } from '../EmailListInput';
 import { CaseReport, UserRole } from '../../types';
-import { WorkflowAction, WORKFLOW_STAGE_LABELS, WORKFLOW_ACTION_LABELS } from '../../utils/caseWorkflow';
+import { WorkflowAction, WORKFLOW_STAGE_LABELS, WORKFLOW_ACTION_LABELS, isApprovedForInvestigationStage } from '../../utils/caseWorkflow';
 
 export interface WorkflowActionPayload {
   permissionRequest?: string;
@@ -29,7 +29,7 @@ const ROLE_WORKFLOW_ACTIONS: Record<UserRole, WorkflowAction[]> = {
   student: [],
   counselor: [],
   dean: [],
-  iic: ['request_permission', 'start_investigation', 'submit_findings'],
+  iic: ['request_permission', 'submit_findings'],
   registrar: ['approve_permission', 'forward_to_disciplinary'],
   disciplinary_committee: ['send_meeting_notice', 'record_verdict'],
   external_counselor: [],
@@ -60,8 +60,7 @@ export function CaseWorkflowPanel({ report, role, onWorkflowAction, saving }: Ca
     if (!validActions.includes(action)) return false;
     if (role === 'iic') {
       if (stage === 'at_iic') return action === 'request_permission';
-      if (stage === 'permission_approved') return action === 'start_investigation';
-      if (stage === 'investigation') return action === 'submit_findings';
+      if (isApprovedForInvestigationStage(stage)) return action === 'submit_findings';
       return false;
     }
     if (role === 'registrar') {
@@ -144,27 +143,6 @@ export function CaseWorkflowPanel({ report, role, onWorkflowAction, saving }: Ca
             className="w-full bg-success text-success-foreground py-2.5 rounded-lg text-sm font-medium hover:bg-success/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? 'Processing...' : 'Approve Permission'}
-          </button>
-        </div>
-      )}
-
-      {availableAction('start_investigation') && (
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-muted-foreground block">
-            Response Notes
-          </label>
-          <textarea
-            value={responseNotes}
-            onChange={(e) => setResponseNotes(e.target.value)}
-            placeholder="Add any notes..."
-            className="w-full min-h-[80px] rounded-lg border border-border bg-transparent px-3 py-2 text-sm resize-none"
-          />
-          <button
-            onClick={() => handleAction('start_investigation')}
-            disabled={saving}
-            className="w-full bg-primary text-primary-foreground py-2.5 rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving ? 'Updating...' : 'Start Investigation'}
           </button>
         </div>
       )}

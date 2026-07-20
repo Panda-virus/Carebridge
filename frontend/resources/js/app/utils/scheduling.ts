@@ -30,6 +30,11 @@ export function slotKey(date: Date, time: string): string {
   return `${d.toISOString().split('T')[0]}-${normalizeTime(time)}`;
 }
 
+function isLunchBreak(time: string): boolean {
+  const [hour, minute] = time.split(':').map(Number);
+  return hour >= 12 && hour < 14;
+}
+
 /** A request holds a slot unless declined/rejected — freed slots become available again */
 function requestHoldsSlot(request: CounselingRequest): boolean {
   if (['rejected', 'approval_rejected', 'completed', 'referred'].includes(request.status)) {
@@ -233,6 +238,10 @@ export function generateAvailableSlots(
         const slotMin = slotStart % 60;
         const timeString = `${slotHour.toString().padStart(2, '0')}:${slotMin.toString().padStart(2, '0')}`;
 
+        if (isLunchBreak(timeString)) {
+          continue;
+        }
+
         slots.push({
           date: new Date(checkDate),
           time: timeString,
@@ -253,9 +262,10 @@ export function autoScheduleAppointment(
   urgencyLevel: UrgencyLevel,
   preferredTime?: string
 ): TimeSlot | null {
-  if (availableSlots.length === 0) return null;
-
-  let filteredSlots = [...availableSlots];
+  const safeSlots = availableSlots.filter(slot => !isLunchBreak(slot.time));
+  if (safeSlots.length === 0) return null;
+  
+  let filteredSlots = [...safeSlots];
 
   // For immediate/critical urgency, get earliest available slot
   if (urgencyLevel === 'immediate' || urgencyLevel === 'critical') {

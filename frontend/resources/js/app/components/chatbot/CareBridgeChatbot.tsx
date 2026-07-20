@@ -502,7 +502,21 @@ export function CareBridgeChatbot({
       case 'service_choice':
       case 'welcome': {
         const lower = input.toLowerCase();
-        if (lower.includes('counsel') || lower.includes('talk') || lower.includes('support') || lower.includes('session')) {
+        if (lower.includes('how do i report') || lower.includes('how to report') || lower.includes('guide')) {
+          showBotMessages([
+            botMsg(
+              'To report a case, simply choose the issue type and describe what happened. We will guide you through the whole process, ask for key details, and help route your report to the right university authority.',
+              ['I want to report something', 'How is a reported case handled?', 'I need counseling support']
+            ),
+          ]);
+        } else if (lower.includes('how is') && lower.includes('case handled') || lower.includes('case handled')) {
+          showBotMessages([
+            botMsg(
+              'Reported cases are reviewed by the appropriate team, such as IIC, Dean of Students, or Disciplinary Committee, depending on the issue. We keep information confidential, and the team will take the next steps while keeping you informed.',
+              ['I want to report something', 'How do I report a case?', 'I need counseling support']
+            ),
+          ]);
+        } else if (lower.includes('counsel') || lower.includes('talk') || lower.includes('support') || lower.includes('session')) {
           setData(prev => ({ ...prev, serviceType: 'counseling' }));
           setStage('counseling_category');
           showBotMessages([
@@ -528,7 +542,7 @@ export function CareBridgeChatbot({
           showBotMessages([
             botMsg(
               "Please choose one of the options below so I can connect you with the right support.",
-              ['I need counseling support', 'I want to report something', 'I\'m in immediate danger']
+              ['I need counseling support', 'I want to report something', 'How do I report a case?', 'How is a reported case handled?', 'I\'m in immediate danger']
             ),
           ]);
         }

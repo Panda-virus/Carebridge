@@ -18,7 +18,12 @@ class CounselingRequestController extends Controller
 
         $user = $request->user();
         if ($user && $user->role === 'student') {
-            $query->where('student_id', $user->id);
+            $query->where(function ($q) use ($user) {
+                $q->where('student_id', $user->id)
+                    ->orWhereHas('student', function ($studentQuery) use ($user) {
+                        $studentQuery->where('id', $user->id);
+                    });
+            });
         }
 
         return response()->json($query->get());

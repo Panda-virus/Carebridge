@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
+import { ReportsPage } from './admin/ReportsPage';
 import { CaseReport } from '../types';
-import { HeartHandshake, LogOut, Users, FileText, Calendar, Download, Search, Plus, Edit, Key, User as UserIcon, Trash2, ClipboardList } from 'lucide-react';
+import { ReportExportPanel } from './ReportExportPanel';
+import { HeartHandshake, LogOut, Users, FileText, Calendar, Search, Plus, Edit, Key, User as UserIcon, Trash2, ClipboardList, Save, X, Menu } from 'lucide-react';
 
 interface User {
   id: number;
@@ -37,11 +39,12 @@ interface SystemAdministratorProps {
   reports: CaseReport[];
   authUser: { role: string };
   onLogout: () => void;
+  onExport?: (params: { startDate: string; endDate: string; category: string; format: 'html' | 'pdf'; type?: string }) => Promise<void>;
 }
 
-export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdministratorProps) {
+export function SystemAdministrator({ reports, authUser, onLogout, onExport }: SystemAdministratorProps) {
   const isAdmin = authUser.role === 'system_administrator';
-  const [activeTab, setActiveTab] = useState<'users' | 'schedules' | 'external' | 'cases' | 'reports'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'schedules' | 'external' | 'cases' | 'reports' | 'reportsPage'>('users');
   const [users, setUsers] = useState<User[]>([]);
   const [schedules, setSchedules] = useState<CounselorSchedule[]>([]);
   const [externalCounselors, setExternalCounselors] = useState<ExternalCounselor[]>([]);
@@ -49,15 +52,14 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [passwordUser, setPasswordUser] = useState<User | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [mobileTabMenuOpen, setMobileTabMenuOpen] = useState(false);
   const [showAddScheduleModal, setShowAddScheduleModal] = useState(false);
   const [showAddExternalModal, setShowAddExternalModal] = useState(false);
-  const [reportMonth, setReportMonth] = useState(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scheduleLoadError, setScheduleLoadError] = useState<string | null>(null);
   const [externalLoadError, setExternalLoadError] = useState<string | null>(null);
+  const [editingSchedule, setEditingSchedule] = useState<CounselorSchedule | null>(null);
+  const [savingScheduleId, setSavingScheduleId] = useState<number | null>(null);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('authToken');
@@ -73,6 +75,34 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
     loadExternalCounselors();
   }, []);
 
+  const tabOptions = [
+    { value: 'users', label: 'Users', icon: Users },
+    { value: 'schedules', label: 'Counselor Schedules', icon: ClipboardList },
+    { value: 'external', label: 'External Counselors', icon: Users },
+    { value: 'cases', label: `Cases (${reports.length})`, icon: FileText },
+    { value: 'reports', label: 'Reports', icon: Calendar },
+  ] as const;
+
+  const activeTabLabel = tabOptions.find((tab) => tab.value === activeTab)?.label ?? 'Users';
+
+  const normalizeScheduleSlot = (slot: any) => ({
+    dayOfWeek: Number(slot.dayOfWeek ?? slot.day_of_week ?? 0),
+    startTime: String(slot.startTime ?? slot.start_time ?? '09:00'),
+    endTime: String(slot.endTime ?? slot.end_time ?? '17:00'),
+    slotDuration: Number(slot.slotDuration ?? slot.slot_duration ?? 60),
+  });
+
+  const normalizeSchedule = (item: any): CounselorSchedule => ({
+    id: item.id,
+    counselorId: item.counselor_id,
+    counselorName: item.counselor_name || item.counselor?.name || 'Unknown',
+    weekStartDate: item.week_start_date,
+    weekEndDate: item.week_end_date,
+    availableSlots: Array.isArray(item.available_slots)
+      ? item.available_slots.map(normalizeScheduleSlot)
+      : [],
+  });
+
   const loadSchedules = async () => {
     setScheduleLoadError(null);
     try {
@@ -84,21 +114,7 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
         throw new Error(payload.message || `HTTP ${response.status}`);
       }
       const data = await response.json();
-      setSchedules(data.map((item: any) => ({
-        id: item.id,
-        counselorId: item.counselor_id,
-        counselorName: item.counselor_name || item.counselor?.name || 'Unknown',
-        weekStartDate: item.week_start_date,
-        weekEndDate: item.week_end_date,
-        availableSlots: Array.isArray(item.available_slots)
-          ? item.available_slots.map((slot: any) => ({
-              dayOfWeek: Number(slot.dayOfWeek ?? slot.day_of_week ?? 0),
-              startTime: String(slot.startTime ?? slot.start_time ?? '09:00'),
-              endTime: String(slot.endTime ?? slot.end_time ?? '17:00'),
-              slotDuration: Number(slot.slotDuration ?? slot.slot_duration ?? 60),
-            }))
-          : [],
-      })));
+      setSchedules(data.map(normalizeSchedule));
     } catch (error: any) {
       console.error('Unable to load schedules', error);
       setSchedules([]);
@@ -217,6 +233,77 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
     }
   };
 
+  const handleStartEditingSchedule = (schedule: CounselorSchedule) => {
+    setEditingSchedule({
+      ...schedule,
+      availableSlots: schedule.availableSlots.map((slot) => ({ ...slot })),
+    });
+  };
+
+  const updateEditingSchedule = (updater: (schedule: CounselorSchedule) => CounselorSchedule) => {
+    setEditingSchedule((prev) => (prev ? updater(prev) : prev));
+  };
+
+  const handleSaveSchedule = async () => {
+    if (!editingSchedule) return;
+
+    setSavingScheduleId(editingSchedule.id);
+    try {
+      const response = await fetch(`/api/counselor-schedules/${editingSchedule.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({
+          counselor_id: editingSchedule.counselorId,
+          week_start_date: editingSchedule.weekStartDate,
+          week_end_date: editingSchedule.weekEndDate,
+          available_slots: editingSchedule.availableSlots.map((slot) => ({
+            day_of_week: slot.dayOfWeek,
+            start_time: slot.startTime,
+            end_time: slot.endTime,
+            slot_duration: slot.slotDuration,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ message: 'Unable to update schedule' }));
+        throw new Error(payload.message || `HTTP ${response.status}`);
+      }
+
+      const payload = await response.json();
+      const normalized = normalizeSchedule(payload);
+      setSchedules((prev) => prev.map((schedule) => (schedule.id === editingSchedule.id ? {
+        ...schedule,
+        counselorId: normalized.counselorId,
+        counselorName: normalized.counselorName,
+        weekStartDate: normalized.weekStartDate,
+        weekEndDate: normalized.weekEndDate,
+        availableSlots: normalized.availableSlots,
+      } : schedule)));
+      setEditingSchedule(null);
+    } catch (error: any) {
+      console.error('Unable to save schedule', error);
+      setScheduleLoadError(error?.message ?? 'Unable to save schedule.');
+    } finally {
+      setSavingScheduleId(null);
+    }
+  };
+
+  const handleSlotChange = (slotIndex: number, field: 'dayOfWeek' | 'startTime' | 'endTime' | 'slotDuration', value: string | number) => {
+    updateEditingSchedule((prev) => ({
+      ...prev,
+      availableSlots: prev.availableSlots.map((slot, index) => (index === slotIndex
+        ? {
+            ...slot,
+            [field]: field === 'dayOfWeek' || field === 'slotDuration' ? Number(value) : String(value),
+          }
+        : slot)),
+    }));
+  };
+
   const handleDeleteExternalCounselor = async (counselorId: number) => {
     try {
       await fetch(`/api/external-counselors/${counselorId}`, {
@@ -226,34 +313,6 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
       setExternalCounselors((prev) => prev.filter((c) => c.id !== counselorId));
     } catch (error) {
       console.error('Unable to delete external counselor', error);
-    }
-  };
-
-  const generateMonthlyReport = () => {
-    try {
-      const [year, month] = reportMonth.split('-').map(Number);
-      const filtered = reports.filter((r) => {
-        const created = new Date(r.createdAt);
-        return created.getFullYear() === year && created.getMonth() === month - 1;
-      });
-
-      const header = `CareBridge Monthly Report - ${reportMonth}\nGenerated on: ${new Date().toLocaleDateString()}\nTotal Cases: ${filtered.length}\n\n`;
-      const rows = filtered.map((r) => [
-        r.id,
-        r.category,
-        r.status,
-        new Date(r.createdAt).toLocaleDateString(),
-      ].join('\t')).join('\n');
-
-      const blob = new Blob([header + 'ID\tCategory\tStatus\tDate\n' + rows], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `carebridge-report-${reportMonth}.txt`;
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Unable to generate report', error);
     }
   };
 
@@ -312,62 +371,68 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
           <p className="text-sm text-muted-foreground mt-1">Manage users, view case statistics, and generate monthly reports.</p>
         </div>
 
-        <div className="mb-6 flex border-b border-border">
-          <button
-            onClick={() => setActiveTab('users')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              activeTab === 'users'
-                ? 'border-primary text-primary font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            Users
-          </button>
-          <button
-            onClick={() => setActiveTab('schedules')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              activeTab === 'schedules'
-                ? 'border-primary text-primary font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <ClipboardList className="w-4 h-4 inline mr-2" />
-            Counselor Schedules
-          </button>
-          <button
-            onClick={() => setActiveTab('external')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              activeTab === 'external'
-                ? 'border-primary text-primary font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Users className="w-4 h-4 inline mr-2" />
-            External Counselors
-          </button>
-          <button
-            onClick={() => setActiveTab('cases')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              activeTab === 'cases'
-                ? 'border-primary text-primary font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <FileText className="w-4 h-4 inline mr-2" />
-            Cases ({reports.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('reports')}
-            className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
-              activeTab === 'reports'
-                ? 'border-primary text-primary font-medium'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Calendar className="w-4 h-4 inline mr-2" />
-            Monthly Reports
-          </button>
+        <div className="mb-6">
+          <div className="hidden md:flex border-b border-border">
+            {tabOptions.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.value;
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => setActiveTab(tab.value)}
+                  className={`px-4 py-3 border-b-2 text-sm whitespace-nowrap transition-colors ${
+                    isActive
+                      ? 'border-primary text-primary font-medium'
+                      : 'border-transparent text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 inline mr-2" />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="md:hidden">
+            <button
+              type="button"
+              onClick={() => setMobileTabMenuOpen((prev) => !prev)}
+              className="flex w-full items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground"
+            >
+              <span className="flex items-center gap-2">
+                <Menu className="w-4 h-4" />
+                {activeTabLabel}
+              </span>
+              <span className="text-xs text-muted-foreground">Menu</span>
+            </button>
+
+            {mobileTabMenuOpen && (
+              <div className="mt-2 space-y-1 rounded-lg border border-border bg-card p-2 shadow-sm">
+                {tabOptions.map((tab) => {
+                  const Icon = tab.icon;
+                  const isActive = activeTab === tab.value;
+                  return (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(tab.value);
+                        setMobileTabMenuOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                        isActive
+                          ? 'bg-primary/10 text-primary'
+                          : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {activeTab === 'users' && (
@@ -478,31 +543,168 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
                 No schedules available.
               </div>
             ) : (
-              <div className="space-y-3">
-                {schedules.map((schedule) => (
-                  <div key={schedule.id} className="bg-card rounded-xl border border-border p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{schedule.counselorName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {schedule.weekStartDate} → {schedule.weekEndDate}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-2">
-                          Slots: {schedule.availableSlots.length}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteSchedule(schedule.id)}
-                        className="text-rose-600 hover:text-rose-700"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="mt-3 text-xs text-muted-foreground">
-                      {JSON.stringify(schedule.availableSlots)}
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto bg-card rounded-xl border border-border">
+                <table className="min-w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/20 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="px-4 py-3">Counselor</th>
+                      <th className="px-4 py-3">Week Start</th>
+                      <th className="px-4 py-3">Week End</th>
+                      <th className="px-4 py-3">Slots</th>
+                      <th className="px-4 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schedules.map((schedule) => {
+                      const isEditing = editingSchedule?.id === schedule.id;
+                      const currentSchedule = isEditing ? editingSchedule : schedule;
+
+                      return (
+                        <tr key={schedule.id} className="border-b border-border last:border-b-0 align-top">
+                          <td className="px-4 py-3">
+                            {isEditing && currentSchedule ? (
+                              <select
+                                value={currentSchedule.counselorId}
+                                onChange={(e) => updateEditingSchedule((prev) => ({ ...prev, counselorId: Number(e.target.value) }))}
+                                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm"
+                              >
+                                {users.filter((user) => user.role === 'counselor').map((user) => (
+                                  <option key={user.id} value={user.id}>{user.name}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <div className="text-sm font-medium text-foreground">{schedule.counselorName}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing && currentSchedule ? (
+                              <input
+                                type="date"
+                                value={currentSchedule.weekStartDate}
+                                onChange={(e) => updateEditingSchedule((prev) => ({ ...prev, weekStartDate: e.target.value }))}
+                                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm"
+                              />
+                            ) : (
+                              <div className="text-sm text-muted-foreground">{schedule.weekStartDate}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing && currentSchedule ? (
+                              <input
+                                type="date"
+                                value={currentSchedule.weekEndDate}
+                                onChange={(e) => updateEditingSchedule((prev) => ({ ...prev, weekEndDate: e.target.value }))}
+                                className="w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm"
+                              />
+                            ) : (
+                              <div className="text-sm text-muted-foreground">{schedule.weekEndDate}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing && currentSchedule ? (
+                              <div className="space-y-2">
+                                <button
+                                  type="button"
+                                  onClick={() => updateEditingSchedule((prev) => ({
+                                    ...prev,
+                                    availableSlots: [
+                                      ...prev.availableSlots,
+                                      { dayOfWeek: 1, startTime: '09:00', endTime: '17:00', slotDuration: 60 },
+                                    ],
+                                  }))}
+                                  className="rounded-lg border border-border px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                                >
+                                  Add slot
+                                </button>
+                                <div className="space-y-2">
+                                  {currentSchedule.availableSlots.map((slot, slotIndex) => (
+                                    <div key={`${schedule.id}-${slotIndex}`} className="grid grid-cols-2 gap-2 rounded-lg border border-border p-2">
+                                      <select
+                                        value={slot.dayOfWeek}
+                                        onChange={(e) => handleSlotChange(slotIndex, 'dayOfWeek', e.target.value)}
+                                        className="rounded-lg border border-border bg-transparent px-2 py-1 text-xs"
+                                      >
+                                        <option value={1}>Monday</option>
+                                        <option value={2}>Tuesday</option>
+                                        <option value={3}>Wednesday</option>
+                                        <option value={4}>Thursday</option>
+                                        <option value={5}>Friday</option>
+                                        <option value={6}>Saturday</option>
+                                        <option value={0}>Sunday</option>
+                                      </select>
+                                      <input
+                                        type="number"
+                                        min={15}
+                                        value={slot.slotDuration}
+                                        onChange={(e) => handleSlotChange(slotIndex, 'slotDuration', e.target.value)}
+                                        className="rounded-lg border border-border bg-transparent px-2 py-1 text-xs"
+                                      />
+                                      <input
+                                        type="time"
+                                        value={slot.startTime}
+                                        onChange={(e) => handleSlotChange(slotIndex, 'startTime', e.target.value)}
+                                        className="rounded-lg border border-border bg-transparent px-2 py-1 text-xs"
+                                      />
+                                      <input
+                                        type="time"
+                                        value={slot.endTime}
+                                        onChange={(e) => handleSlotChange(slotIndex, 'endTime', e.target.value)}
+                                        className="rounded-lg border border-border bg-transparent px-2 py-1 text-xs"
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="text-sm text-muted-foreground">
+                                {schedule.availableSlots.length > 0 ? schedule.availableSlots.map((slot) => `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][slot.dayOfWeek ?? 0]} ${slot.startTime}-${slot.endTime}`).join(' • ') : 'No slots'}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isEditing ? (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleSaveSchedule}
+                                  disabled={savingScheduleId === schedule.id}
+                                  className="flex items-center gap-1 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
+                                >
+                                  <Save className="h-4 w-4" />
+                                  {savingScheduleId === schedule.id ? 'Saving...' : 'Save'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSchedule(null)}
+                                  className="rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:bg-accent"
+                                >
+                                  <X className="h-4 w-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => handleStartEditingSchedule(schedule)}
+                                  className="text-primary hover:text-primary/80"
+                                  title="Edit schedule"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteSchedule(schedule.id)}
+                                  className="text-rose-600 hover:text-rose-700"
+                                  title="Delete schedule"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -622,30 +824,24 @@ export function SystemAdministrator({ reports, authUser, onLogout }: SystemAdmin
           </div>
         )}
 
-        {activeTab === 'reports' && (
-          <div className="bg-card rounded-xl border border-border p-6">
-            <h3 className="font-semibold text-foreground mb-4">Monthly Activity Report</h3>
-            <div className="flex items-end gap-4">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1">Month</label>
-                <input
-                  type="month"
-                  value={reportMonth}
-                  onChange={(e) => setReportMonth(e.target.value)}
-                  className="rounded-lg border border-border bg-transparent px-3 py-2 text-sm"
-                />
-              </div>
-              <button
-                onClick={generateMonthlyReport}
-                className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90"
-              >
-                <Download className="w-4 h-4" />
-                Download Report
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-3">
-              Download a plain-text summary of cases for the selected month.
-            </p>
+        {activeTab === 'reports' && onExport && (
+          <div className="w-full">
+            <ReportExportPanel
+              availableCategories={[...new Set(reports.map((report) => report.category).filter(Boolean))] as string[]}
+              onExport={onExport}
+              initialMonth={new Date().toISOString().slice(0, 7)}
+              defaultType="case-reports"
+              typeOptions={[
+                { value: 'case-reports', label: 'Case reports' },
+                { value: 'user-activity', label: 'User activity' },
+              ]}
+            />
+          </div>
+        )}
+
+        {activeTab === 'reportsPage' && (
+          <div>
+            <ReportsPage />
           </div>
         )}
       </div>

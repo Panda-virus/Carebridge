@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\CaseReport;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class CaseWorkflowPermissionRequestTest extends TestCase
@@ -42,5 +43,33 @@ class CaseWorkflowPermissionRequestTest extends TestCase
         ]);
 
         $this->assertSame('permission_pending', $caseReport->fresh()->workflow_stage);
+    }
+
+    public function test_submit_findings_accepts_files_sent_with_bracketed_field_names(): void
+    {
+        $user = User::create([
+            'name' => 'IIC Officer',
+            'email' => 'iic@example.com',
+            'password' => 'password123',
+            'role' => 'iic',
+        ]);
+
+        $caseReport = CaseReport::create([
+            'description' => 'Test case',
+            'status' => 'ongoing_investigation',
+            'workflow_stage' => 'investigation',
+        ]);
+
+        $token = $user->createToken('test')->plainTextToken;
+        $file = UploadedFile::fake()->create('findings.pdf', 100, 'application/pdf');
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $token)
+            ->post('/api/case-reports/' . $caseReport->id . '/workflow/submit-findings', [
+                'findings_report' => 'Findings summary',
+                'findings_files[]' => [$file],
+            ]);
+
+        $response->assertOk();
+        $this->assertNotNull($caseReport->fresh()->findings_files);
     }
 }

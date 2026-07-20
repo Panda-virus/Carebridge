@@ -6,6 +6,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\CounselingRequestController;
 use App\Http\Controllers\CounselingSessionController;
 use App\Http\Controllers\CaseReportController;
+use App\Http\Controllers\EvidenceFileController;
 use App\Http\Controllers\CounselorScheduleController;
 use App\Http\Controllers\ExternalCounselorController;
 use App\Http\Controllers\AuthController;
@@ -23,7 +24,7 @@ Route::post('/register', [RegisterController::class, 'register']);
 Route::post('/case-reports', [CaseReportController::class, 'store']);
 
 // Protected routes
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['auth:sanctum', \App\Http\Middleware\AccessLogMiddleware::class])->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
@@ -47,6 +48,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('counseling-requests/{id}/external-records', [App\Http\Controllers\CounselingSessionLogController::class, 'addExternalRecord']);
 
     // Case reports
+    // Export case reports (HTML or PDF) filtered by category
+    Route::get('case-reports/export', [CaseReportController::class, 'export']);
     Route::apiResource('case-reports', CaseReportController::class)->except(['store']);
 
     // Counselor schedule and availability
@@ -62,6 +65,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('case-reports/{caseReport}/workflow/start-investigation', [CaseWorkflowController::class, 'startInvestigation']);
     Route::post('case-reports/{caseReport}/workflow/submit-findings', [CaseWorkflowController::class, 'submitFindings']);
     Route::get('case-reports/{caseReport}/findings-file', [CaseWorkflowController::class, 'downloadFindingFile']);
+    // Evidence file download and deletion
+    Route::get('evidence-files/{id}/download', [EvidenceFileController::class, 'download']);
+    Route::delete('evidence-files/{id}', [EvidenceFileController::class, 'destroy']);
     Route::post('case-reports/{caseReport}/workflow/forward-to-disciplinary', [CaseWorkflowController::class, 'forwardToDisciplinary']);
     Route::post('case-reports/{caseReport}/workflow/dismiss-case', [CaseWorkflowController::class, 'dismissCase']);
     Route::post('case-reports/{caseReport}/workflow/send-meeting-notice', [CaseWorkflowController::class, 'sendMeetingNotice']);
@@ -74,4 +80,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('case-reports/{id}/timeline/pending', [CaseTimelineController::class, 'pendingStages']);
     Route::get('case-reports/{id}/timeline/overdue', [CaseTimelineController::class, 'overdueStages']);
     Route::post('case-reports/{id}/timeline/check-overdue', [CaseTimelineController::class, 'checkOverdue']);
+
+    // Reports
+    Route::get('reports/counseling-progress', [App\Http\Controllers\ReportsController::class, 'counselingProgress']);
+    Route::get('reports/appointments', [App\Http\Controllers\ReportsController::class, 'appointments']);
+    Route::get('reports/cases', [App\Http\Controllers\ReportsController::class, 'cases']);
+    Route::get('reports/users', [App\Http\Controllers\ReportsController::class, 'users']);
+    Route::get('reports/users/export', [App\Http\Controllers\ReportsController::class, 'exportUsers']);
 });

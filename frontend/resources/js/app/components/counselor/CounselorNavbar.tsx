@@ -130,8 +130,8 @@ export function CounselorNavbar({
 
       {/* Case subtabs - only show on cases tab */}
       {activeTab === 'cases' && onCaseSubTabChange && (
-        <div className={`border-t border-border overflow-x-auto ${mobileMenuOpen ? 'block' : ''}`}>
-          <div className="px-4 sm:px-6 flex gap-1 min-w-max py-3 text-sm">
+        <div className={`border-t border-border overflow-x-auto md:overflow-visible ${mobileMenuOpen ? 'block' : ''}`}>
+          <div className="px-4 sm:px-6 flex flex-col md:flex-row md:justify-center items-center gap-2 py-3 text-sm">
             {caseSubTabs.map((tab) => (
               <button
                 key={tab.id}

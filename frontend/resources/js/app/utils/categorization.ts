@@ -84,7 +84,8 @@ const caseKeywords: Record<CaseCategory, string[]> = {
   sexual_harassment: [
     'sexual harassment', 'inappropriate touching', 'unwanted advances',
     'sexual comments', 'groping', 'sexual favors', 'quid pro quo', 'sexually abused',
-    'sexual pressure', 'inappropriate comments about appearance', 'sexual abuse','sexually assaulted'
+    'sexual pressure', 'inappropriate comments about appearance', 'sexual abuse', 'sexually assaulted',
+    'sexually harassed', 'sexually harrassed'
   ],
   sexual_harassment_gbv: [
     'gender based violence', 'gender-based violence', 'sexual harassment', 'unwanted advances',

@@ -14,10 +14,12 @@ import {
 import { CaseReport, CaseWorkflowStage, UserRole } from '../../types';
 import { CaseWorkflowPanel, WorkflowActionPayload } from '../cases/CaseWorkflowPanel';
 import { WorkflowAction, WORKFLOW_STAGE_LABELS, disciplinaryWorkflowStages } from '../../utils/caseWorkflow';
+import { ReportExportPanel } from '../ReportExportPanel';
 
 interface DisciplinaryDashboardProps {
   reports: CaseReport[];
   onWorkflowAction: (reportId: string, action: WorkflowAction, payload: WorkflowActionPayload) => void;
+  onExport?: (params: { month: string; category: string; format: 'html' | 'pdf'; type?: string }) => Promise<void>;
   onLogout?: () => void;
 }
 
@@ -111,7 +113,7 @@ function DisciplinaryCaseCard({
   );
 }
 
-export function DisciplinaryDashboard({ reports, onWorkflowAction, onLogout }: DisciplinaryDashboardProps) {
+export function DisciplinaryDashboard({ reports, onWorkflowAction, onExport, onLogout }: DisciplinaryDashboardProps) {
   const [activeTab, setActiveTab] = useState<'all' | CaseWorkflowStage>('all');
   const [savingId, setSavingId] = useState<string | null>(null);
 
@@ -179,20 +181,36 @@ export function DisciplinaryDashboard({ reports, onWorkflowAction, onLogout }: D
           </p>
         </div>
 
-        <div className="grid grid-cols-3 gap-4 mb-6">
-          {[
-            { key: 'with_disciplinary', label: 'Awaiting Meeting Notice' },
-            { key: 'meeting_notice_sent', label: 'Meetings Scheduled' },
-            { key: 'closed', label: 'Closed' },
-          ].map(({ key, label }) => (
-            <div key={key} className="bg-card rounded-xl border border-border p-5">
-              <p className="text-2xl font-bold">{counts[key as keyof typeof counts]}</p>
-              <p className="text-sm text-muted-foreground">{label}</p>
-            </div>
-          ))}
+        <div className="grid gap-6 xl:grid-cols-[1.7fr_1fr] mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {[
+              { key: 'with_disciplinary', label: 'Awaiting Meeting Notice' },
+              { key: 'meeting_notice_sent', label: 'Meetings Scheduled' },
+              { key: 'closed', label: 'Closed' },
+            ].map(({ key, label }) => (
+              <div key={key} className="bg-card rounded-xl border border-border p-5">
+                <p className="text-2xl font-bold">{counts[key as keyof typeof counts]}</p>
+                <p className="text-sm text-muted-foreground">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {onExport ? (
+            <ReportExportPanel
+              availableCategories={[...new Set(reports.map((r) => r.category).filter(Boolean))] as string[]}
+              onExport={onExport}
+              typeOptions={[
+                { value: 'default', label: 'Default disciplinary report' },
+                { value: 'hearing_summary', label: 'Hearing summary' },
+                { value: 'verdict_report', label: 'Verdict report' },
+                { value: 'case_closure_report', label: 'Case closure report' },
+              ]}
+              initialMonth={new Date().toISOString().slice(0, 7)}
+            />
+          ) : null}
         </div>
 
-        <div className="flex gap-1 mb-6 border-b border-border overflow-x-auto">
+        <div className="flex flex-col sm:flex-row flex-wrap gap-1 mb-6 border-b border-border overflow-x-auto md:overflow-visible">
           {[
             { key: 'all', label: `All (${counts.all})` },
             ...stages.map((s) => ({ key: s, label: WORKFLOW_STAGE_LABELS[s] })),

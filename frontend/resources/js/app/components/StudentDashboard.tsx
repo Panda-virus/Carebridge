@@ -66,7 +66,7 @@ export function StudentDashboard({
 
   const handleNavigate = (page: string) => {
     if (page === 'case-reports') {
-      setCaseReportsViewKey((value) => value + 1);
+      // Navigate to the cases list view. Do not auto-open the report form.
       setCurrentPage('case-reports');
       return;
     }

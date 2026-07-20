@@ -795,10 +795,12 @@ export function LandingPage({ onShowLogin, onShowRegister, onReportCase, onProfi
       {/* ── Floating Chat Button ───────────────────────────────────────── */}
       <button
         onClick={handleOpenChatbot}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-lg hover:bg-primary/90 transition-all hover:scale-110 flex items-center justify-center"
+        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full shadow-2xl flex items-center justify-center transition-all hover:scale-110"
+        style={{ backgroundColor: '#279B37' }}
         title="Chat with CareBridge"
       >
-        <MessageCircle className="w-6 h-6" />
+        <span className="absolute inset-0 rounded-full animate-ping opacity-30" style={{ backgroundColor: '#279B37' }} />
+        <MessageCircle className="w-6 h-6 text-white relative" />
       </button>
 
       {/* ── Chatbot Component ───────────────────────────────────────────── */}

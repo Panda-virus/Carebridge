@@ -21,7 +21,7 @@ export function NotificationsPage({ caseReports }: { caseReports: CaseReport[] }
   notifications.unshift({ id: 'sys-1', title: 'CareBridge Update', body: 'We have updated the platform with improved notifications.' });
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6">
+    <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm p-4 sm:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-foreground">Notifications</h2>
@@ -37,9 +37,9 @@ export function NotificationsPage({ caseReports }: { caseReports: CaseReport[] }
           No notifications yet.
         </div>
       ) : (
-        <div className="mt-4 space-y-3">
-          {notifications.map((n) => (
-            <div key={n.id} className="rounded-xl border border-border bg-background/70 p-4">
+        <div className="mt-4 divide-y divide-border/50">
+          {notifications.map((n, index) => (
+            <div key={n.id} className={index === 0 ? 'py-4' : 'py-4'}>
               <p className="font-semibold text-foreground">{n.title}</p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground whitespace-pre-wrap">{n.body}</p>
             </div>

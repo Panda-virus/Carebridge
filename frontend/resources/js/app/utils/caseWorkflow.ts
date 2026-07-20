@@ -30,6 +30,10 @@ export function iicActiveStages(): CaseWorkflowStage[] {
   return ['at_iic', 'permission_pending', 'permission_approved', 'investigation'];
 }
 
+export function isApprovedForInvestigationStage(stage: CaseWorkflowStage | undefined): boolean {
+  return stage === 'permission_approved' || stage === 'investigation';
+}
+
 export function registrarWorkflowStages(): CaseWorkflowStage[] {
   return ['permission_pending', 'findings_with_registrar'];
 }

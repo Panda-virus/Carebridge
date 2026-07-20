@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\CaseReport;
 use App\Models\User;
 use App\Services\NotificationService;
+use App\Models\RoleAuditLog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -41,6 +42,18 @@ class UserController extends Controller
             'role' => $data['role'] ?? 'student',
             'is_external' => $data['is_external'] ?? (($data['role'] ?? 'student') === 'external_counselor'),
         ]));
+
+        RoleAuditLog::create([
+            'role_name' => $user->role ?? 'student',
+            'action' => 'created',
+            'changed_by' => $request->user()?->id,
+            'subject_id' => $user->id,
+            'subject_type' => User::class,
+            'old_value' => null,
+            'new_value' => $user->role ?? 'student',
+            'details' => 'User account created with role assignment.',
+            'changed_at' => now(),
+        ]);
 
         if ($request->boolean('send_welcome', true)) {
             NotificationService::notifyWelcomeUser(
@@ -84,7 +97,22 @@ class UserController extends Controller
             $data['password'] = Hash::make($data['password']);
         }
 
+        $oldRole = $user->role;
         $user->update($data);
+
+        if (isset($data['role']) && $data['role'] !== $oldRole) {
+            RoleAuditLog::create([
+                'role_name' => $data['role'],
+                'action' => 'updated',
+                'changed_by' => auth()->id(),
+                'subject_id' => $user->id,
+                'subject_type' => User::class,
+                'old_value' => $oldRole,
+                'new_value' => $data['role'],
+                'details' => 'User role changed.',
+                'changed_at' => now(),
+            ]);
+        }
 
         return response()->json($user);
     }

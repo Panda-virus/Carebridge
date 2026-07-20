@@ -47,12 +47,16 @@ export function StudentNavbar({ currentPage, userName, onNavigate, onLogout }: S
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 rounded-lg">
+          <button
+            type="button"
+            onClick={() => onNavigate('profile')}
+            className="flex items-center gap-2 px-3 py-1.5 bg-muted/40 rounded-lg cursor-pointer hover:bg-muted/60 transition-colors"
+          >
             <div className="w-6 h-6 bg-primary/20 rounded-full flex items-center justify-center">
               <User className="w-3.5 h-3.5 text-primary" />
             </div>
             <span className="text-sm text-foreground font-medium truncate max-w-[120px]">{userName}</span>
-          </div>
+          </button>
           <button
             onClick={onLogout}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all text-sm"
@@ -71,8 +75,8 @@ export function StudentNavbar({ currentPage, userName, onNavigate, onLogout }: S
       </div>
 
       {mobileOpen && (
-        <div className="md:hidden border-t border-border bg-white">
-          <div className="space-y-1 px-4 py-3">
+        <div className="md:hidden border-t border-border bg-white md:overflow-visible">
+          <div className="px-4 py-3 flex flex-col gap-1">
             {navItems.map((item) => (
               <a
                 key={item.id}
@@ -80,14 +84,14 @@ export function StudentNavbar({ currentPage, userName, onNavigate, onLogout }: S
                 onClick={(e) => { e.preventDefault(); onNavigate(item.id); setMobileOpen(false); }}
                 className={
                   currentPage === item.id
-                    ? 'w-full text-left px-4 py-3 rounded-lg text-sm bg-primary/10 text-primary'
-                    : 'w-full text-left px-4 py-3 rounded-lg text-sm text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors'
+                    ? 'block w-full text-left px-4 py-3 rounded-lg text-sm bg-primary/10 text-primary'
+                    : 'block w-full text-left px-4 py-3 rounded-lg text-sm text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors'
                 }
               >
                 {item.label}
               </a>
             ))}
-            <div className="border-t border-border pt-3 mt-2 space-y-1">
+            <div className="border-t border-border pt-3 mt-2 flex flex-col gap-1">
               <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
                 <User className="w-4 h-4" />
                 {userName}

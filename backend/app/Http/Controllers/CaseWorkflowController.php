@@ -8,6 +8,7 @@ use App\Models\CaseReport;
 use App\Models\RegistrarCaseFile;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
@@ -92,9 +93,14 @@ class CaseWorkflowController extends Controller
         $caseReport->status = 'findings_under_review';
 
         $uploaded = [];
-        if ($request->hasFile('findings_files')) {
-            foreach ($request->file('findings_files') as $file) {
-                if (! $file->isValid()) {
+        $files = $request->file('findings_files');
+        if (empty($files) && $request->hasFile('findings_files[]')) {
+            $files = $request->file('findings_files[]');
+        }
+
+        if (! empty($files)) {
+            foreach ($files as $file) {
+                if (! $file instanceof \Illuminate\Http\UploadedFile || ! $file->isValid()) {
                     continue;
                 }
                 $path = $file->storePubliclyAs('case_findings', Str::random(24) . '_' . $file->getClientOriginalName(), 'public');
@@ -149,17 +155,23 @@ class CaseWorkflowController extends Controller
             abort(404);
         }
 
-        return $disk->download($filePath, $fileName);
+        $absolutePath = $disk->path($filePath);
+
+        return response()->file($absolutePath, [
+            'Content-Disposition' => 'inline; filename="' . basename((string) $fileName) . '"',
+        ]);
     }
 
     public function forwardToDisciplinary(Request $request, CaseReport $caseReport)
     {
-        $caseReport->response_notes = $request->input('response_notes');
+        $reason = trim((string) ($request->input('response_notes') ?? $request->input('reason') ?? ''));
+
+        $caseReport->response_notes = $reason;
         $caseReport->workflow_stage = 'with_disciplinary';
         $caseReport->status = 'referred_to_disciplinary_hearing';
         $caseReport->registrar_action = 'referred';
-        $caseReport->registrar_action_reason = $request->input('response_notes');
-        $content = $this->generateRegistrarCaseFile($caseReport, 'Referred to Disciplinary Committee', $request->input('response_notes'));
+        $caseReport->registrar_action_reason = $reason;
+        $content = $this->generateRegistrarCaseFile($caseReport, 'Referred to Disciplinary Committee', $reason);
         // persist a registrar case file record
         $rcf = RegistrarCaseFile::create([
             'case_report_id' => $caseReport->id,
@@ -175,7 +187,9 @@ class CaseWorkflowController extends Controller
         ]);
 
         $caseReport->registrar_case_file = $content;
-        $caseReport->registrar_case_file_id = $rcf->id;
+        if (Schema::hasColumn($caseReport->getTable(), 'registrar_case_file_id')) {
+            $caseReport->registrar_case_file_id = $rcf->id;
+        }
         $caseReport->save();
 
         return response()->json($caseReport->fresh(['user', 'student', 'permissionRequestRecord', 'latestFinding']));
@@ -187,12 +201,14 @@ class CaseWorkflowController extends Controller
             'reason' => ['required', 'string', 'max:2000'],
         ]);
 
-        $caseReport->response_notes = $request->input('reason');
+        $reason = trim((string) ($request->input('reason') ?? $request->input('response_notes') ?? ''));
+
+        $caseReport->response_notes = $reason;
         $caseReport->workflow_stage = 'closed';
         $caseReport->status = 'closed';
         $caseReport->registrar_action = 'dismissed';
-        $caseReport->registrar_action_reason = $request->input('reason');
-        $content = $this->generateRegistrarCaseFile($caseReport, 'Dismissed by Registrar', $request->input('reason'));
+        $caseReport->registrar_action_reason = $reason;
+        $content = $this->generateRegistrarCaseFile($caseReport, 'Dismissed by Registrar', $reason);
         $rcf = RegistrarCaseFile::create([
             'case_report_id' => $caseReport->id,
             'case_number' => $caseReport->ticket_number ?? $caseReport->id,
@@ -207,7 +223,9 @@ class CaseWorkflowController extends Controller
         ]);
 
         $caseReport->registrar_case_file = $content;
-        $caseReport->registrar_case_file_id = $rcf->id;
+        if (Schema::hasColumn($caseReport->getTable(), 'registrar_case_file_id')) {
+            $caseReport->registrar_case_file_id = $rcf->id;
+        }
         $caseReport->save();
 
         return response()->json($caseReport->fresh(['user', 'student', 'permissionRequestRecord', 'latestFinding']));
